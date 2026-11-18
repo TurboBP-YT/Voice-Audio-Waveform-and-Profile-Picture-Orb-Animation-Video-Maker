@@ -7,11 +7,11 @@ const FPS = 60;
 const RESOLUTION = { x: 1080, y: 1920 };
 const res_min = Math.min(RESOLUTION.x, RESOLUTION.y);
 const N_FRAMES_OF_AUDIO_ON_SCREEN = 9; // must be an odd number that divides RESOLUTION.x
-const FILLS_DUR_RMS_WIN_S = 1 / 90;
-const ORB_DUR_RMS_WIN_S = 1 / 4;
+const FILLS_DUR_RMS_WIN_S = 1 / 60;
+const ORB_DUR_RMS_WIN_S = 1 / 3;
 const FILLS_PRECISION_RES_PX = 3;
 const BLOOM_MAX_RADIUS = 0.125;
-const BLOOM_INTENSITY = 1 / 3;
+const BLOOM_INTENSITY = 0;
 
 const PFP_RADIUS = 0.15;
 const PFP_RING_GAP = 0.015;
@@ -25,12 +25,14 @@ const ORB_INFLECTION_THICK = 0.04;
 const rms_at_which_orb_reaches_full_brightness =
   ORB_INFLECTION_THICK / (ORB_MAX_RADIUS - orb_min_radius);
 const waveform_max_height = 2 * ring_outer_radius;
-const COLOR_BASIC_WAVEFORM = "#c0d0e0";
-const COLOR_BG = "#000000";
+const COLOR_BASIC_WAVEFORM = "#606162";
+const COLOR_BG = "#060708";
+const COLOR_PFP_BG = "black";
 const COLOR_RING_COLOR_DARKEN_MULTIPLIER = "#a0a0a0";
-const COLOR_ORB = "#202730";
-const NON_VIGNETTED_PROPORTION = 7 / 8;
+const COLOR_ORB = "#202122";
+const NON_VIGNETTED_PROPORTION = 9 / 10;
 const COLOR_VIGNETTE = "#b0b0b0";
+const COLOR_OUTSIDE_OF_ORB_GLOW_MULTIPLIER = "#808080";
 const ORB_GLOW_BOUNDARY_SOFT = 0.025;
 const WAVE_LINE_THICK_PX = 2;
 const n_wave_frames_cover_ring =
@@ -194,6 +196,7 @@ class Layer {
 class LayerGroup {
   constructor(
     { x: width, y: height },
+    webglBlender,
     children,
     blendMode = "source-over",
     alpha = 1.0,
@@ -201,16 +204,18 @@ class LayerGroup {
   ) {
     this.canvas = new OffscreenCanvas(width, height);
     this.canvas.ctx = this.canvas.getContext("2d");
-    this.canvas2 = new OffscreenCanvas(width, height);
-    this.canvas2.ctx = this.canvas2.getContext("2d");
+    this.webglBlender = webglBlender;
+    //this.canvas2 = new OffscreenCanvas(width, height);
+    //this.canvas2.ctx = this.canvas2.getContext("2d");
     this.children = children;
     this.blendMode = blendMode;
     this.alpha = alpha;
     this.nRepeatPaints = nRepeatPaints;
   }
   composite() {
-    this.canvas.ctx.save();
-    this.canvas.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     for (let child of this.children.toReversed()) {
       // array order : first is on top
       if (child instanceof MixFiltersOverlay) {
@@ -219,6 +224,7 @@ class LayerGroup {
       } else if (child instanceof LayerGroup) {
         child.composite();
       }
+      /*
       const isColorBasedBlendMode = [
         "lighter",
         "multiply",
@@ -255,8 +261,31 @@ class LayerGroup {
           this.canvas.ctx.drawImage(this.canvas2, 0, 0);
         }
       }
+      */
+      for (let nPaint = 0; nPaint < 1 + this.nRepeatPaints; nPaint++) {
+        if (child.blendMode in this.webglBlender.modes) {
+          const result = this.webglBlender.blend(
+            this.canvas,
+            child.canvas,
+            child.blendMode,
+            child.alpha,
+          );
+
+          ctx.save();
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = "copy";
+          ctx.drawImage(result, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.globalAlpha = child.alpha;
+          ctx.globalCompositeOperation = child.blendMode;
+          ctx.drawImage(child.canvas, 0, 0);
+          ctx.restore();
+        }
+      }
     }
-    this.canvas.ctx.restore();
+    ctx.restore();
   }
 }
 
@@ -411,7 +440,7 @@ function drawFillCircleAtCenter(ctx, radius, color) {
 
 function drawLayerPfp(ctx, iPfp) {
   // GAP
-  drawFillCircleAtCenter(ctx, PFP_RING_GAP + PFP_RADIUS, COLOR_BG);
+  drawFillCircleAtCenter(ctx, PFP_RING_GAP + PFP_RADIUS, COLOR_PFP_BG);
 
   // PICTURE
   useRelativeCoordinateSpace(ctx, () => {
@@ -465,11 +494,12 @@ function drawLayerVignette(ctx) {
 }
 
 function drawLayerOrbGlow(ctx, canvasOrbMask) {
-  drawSolidFill(ctx, COLOR_VIGNETTE);
+  drawSolidFill(ctx, COLOR_OUTSIDE_OF_ORB_GLOW_MULTIPLIER);
 
   ctx.globalCompositeOperation = "screen";
   ctx.filter = `blur(${res_min * ORB_GLOW_BOUNDARY_SOFT}px)`;
   ctx.drawImage(canvasOrbMask, 0, 0);
+  drawFillCircleAtCenter(ctx, orb_min_radius, "white");
 }
 
 function drawLayerOrbMask(ctx, rms) {
@@ -536,6 +566,8 @@ function drawLayerWaveFade(ctx, img) {
     ctx.fillRect(-0.51, -0.51, 1.02, 1.02);
   });
   */
+  drawSolidFill(ctx, COLOR_BG);
+  ctx.globalCompositeOperation = "destination-in";
   useRelativeCoordinateSpace(ctx, () => {
     ctx.drawImage(
       img,
@@ -723,7 +755,8 @@ async function render(
     layerRingFill,
     layerWaveFade,
     layerRingColorDarken;
-  const rootLayer = new LayerGroup(RESOLUTION, [
+  const webglBlender = new WebGLBlendCompositor(RESOLUTION.x, RESOLUTION.y);
+  const rootLayer = new LayerGroup(RESOLUTION, webglBlender, [
     (layerPfp = new Layer(RESOLUTION, drawLayerPfp)), // Profile Picture
     new MixFiltersOverlay( // Bloom
       RESOLUTION,
@@ -735,9 +768,10 @@ async function render(
       "screen",
       BLOOM_INTENSITY,
     ),
-    new LayerGroup(RESOLUTION, [
+    new LayerGroup(RESOLUTION, webglBlender, [
       new LayerGroup(
         RESOLUTION,
+        webglBlender,
         [
           (layerRingFillMultiplyColor = new Layer(
             RESOLUTION,
@@ -759,8 +793,8 @@ async function render(
       "screen",
       BLOOM_INTENSITY,
     ),
-    new LayerGroup(RESOLUTION, [
-      (layerWaveFade = new Layer(RESOLUTION, drawLayerWaveFade, "multiply")), // Waveform Fade into Ring
+    new LayerGroup(RESOLUTION, webglBlender, [
+      (layerWaveFade = new Layer(RESOLUTION, drawLayerWaveFade, "source-atop")), // Waveform Fade into Ring
       (layerOrbGlow = new Layer(RESOLUTION, drawLayerOrbGlow, "multiply")), // Orb Glow
       (layerWaveformVignette = new Layer(
         RESOLUTION,
@@ -774,8 +808,19 @@ async function render(
       )), // Waveform Color Fill
       (layerWaveform = new Layer(RESOLUTION, drawLayerWaveform)), // Waveform
     ]),
-    (layerOrbMultiplyColor = new Layer(RESOLUTION, drawSolidFill, "multiply")), // Orb Color
-    (layerOrbMask = new Layer(RESOLUTION, drawLayerOrbMask)), // Orb Mask
+    new LayerGroup(
+      RESOLUTION,
+      webglBlender,
+      [
+        (layerOrbMultiplyColor = new Layer(
+          RESOLUTION,
+          drawSolidFill,
+          "multiply",
+        )), // Orb Color
+        (layerOrbMask = new Layer(RESOLUTION, drawLayerOrbMask)), // Orb Mask
+      ],
+      "lighter",
+    ),
     (layerBg = new Layer(RESOLUTION, drawSolidFill)), // Background
   ]);
 

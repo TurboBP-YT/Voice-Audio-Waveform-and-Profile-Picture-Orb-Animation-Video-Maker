@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <title>
+      Voice Audio Waveform and Profile Picture Orb Animation Video Maker
+    </title>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="reset.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-screen="upload">
+    <section id="screen-upload">
+      <h1>Unscripted Faceless YouTube Short Video Maker</h1>
+      <form id="options">
+        <fieldset data-type="single" data-name="fRecording">
+          <legend>WAV File (Mono)</legend>
+          <input type="file" accept="audio/wav" />
+        </fieldset>
+        <hr />
+        <fieldset data-type="choice" data-name="fPfp">
+          <legend>Speaker Profile Picture</legend>
+          <div>
+            <label>
+              <input type="radio" name="pfp" checked />
+              <span class="select-value" accept="image/*">TurboBP</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input type="radio" name="pfp" />
+              <input type="file" class="select-value" />
+            </label>
+          </div>
+        </fieldset>
+        <fieldset data-type="choice" data-name="hexRingColor">
+          <legend>Ring Color</legend>
+          <div>
+            <label>
+              <input type="radio" name="ring-color" checked />
+              <span class="select-value">#3090ff</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input type="radio" name="ring-color" />
+              <span class="select-value">#ff3060</span>
+            </label>
+          </div>
+          <div>
+            <label>
+              <input type="radio" name="ring-color" />
+              <input
+                type="text"
+                class="select-value"
+                placeholder="#______"
+                value="#"
+              />
+            </label>
+          </div>
+        </fieldset>
+        <div>
+          <button type="submit" data-mode="real">Render to File</button>
+          <button type="submit" data-mode="test">Preview</button>
+        </div>
+      </form>
+    </section>
+    <section id="screen-render">
+      <div>
+        <progress id="render-progress"></progress>
+      </div>
+      <canvas id="viewer"></canvas>
+    </section>
+  </body>
+
+  <script src="https://cdn.jsdelivr.net/npm/@alexanderolsen/libsamplerate-js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjs@15.2.0/lib/browser/math.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js"></script>
+
+  <script src="utils.js"></script>
+  <script src="audio.js"></script>
+  <script src="graphics.js"></script>
+  <script src="index.js"></script>
+</html>

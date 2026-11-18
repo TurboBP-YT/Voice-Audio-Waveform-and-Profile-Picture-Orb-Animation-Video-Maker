@@ -7,8 +7,8 @@ const FPS = 60;
 const RESOLUTION = { x: 1080, y: 1920 };
 const res_min = Math.min(RESOLUTION.x, RESOLUTION.y);
 const N_FRAMES_OF_AUDIO_ON_SCREEN = 9; // must be an odd number that divides RESOLUTION.x
-const FILLS_DUR_RMS_WIN_S = 1 / 120;
-const ORB_DUR_RMS_WIN_S = 1 / 5;
+const FILLS_DUR_RMS_WIN_S = 1 / 90;
+const ORB_DUR_RMS_WIN_S = 1 / 4;
 const FILLS_PRECISION_RES_PX = 3;
 const BLOOM_MAX_RADIUS = 0.125;
 const BLOOM_INTENSITY = 1 / 3;
@@ -25,9 +25,11 @@ const ORB_INFLECTION_THICK = 0.04;
 const rms_at_which_orb_reaches_full_brightness =
   ORB_INFLECTION_THICK / (ORB_MAX_RADIUS - orb_min_radius);
 const waveform_max_height = 2 * ring_outer_radius;
+const COLOR_BASIC_WAVEFORM = "#c0d0e0";
 const COLOR_BG = "#000000";
 const COLOR_RING_COLOR_DARKEN_MULTIPLIER = "#a0a0a0";
 const COLOR_ORB = "#202730";
+const NON_VIGNETTED_PROPORTION = 7 / 8;
 const COLOR_VIGNETTE = "#b0b0b0";
 const ORB_GLOW_BOUNDARY_SOFT = 0.025;
 const WAVE_LINE_THICK_PX = 2;
@@ -443,7 +445,14 @@ function drawLayerVignette(ctx) {
   ctx.fillRect(0, 0, RESOLUTION.x, RESOLUTION.y);
   useRelativeCoordinateSpace(ctx, () => {
     // 1. Create radial gradient: (x0, y0, r0, x1, y1, r1)
-    const gradient = ctx.createRadialGradient(0, 0, 3 / 8, 0, 0, 1 / 2);
+    const gradient = ctx.createRadialGradient(
+      0,
+      0,
+      NON_VIGNETTED_PROPORTION / 2,
+      0,
+      0,
+      1 / 2,
+    );
 
     // 2. Add color stops (offset from 0.0 to 1.0)
     gradient.addColorStop(0, "white");
@@ -572,7 +581,7 @@ function drawLayerWaveform(ctx, waveformFrames) {
 
 function drawLayerWaveformColor(ctx) {
   // TODO : FL studio style waveform color
-  drawSolidFill(ctx, "white"); // uncolored waveform
+  drawSolidFill(ctx, COLOR_BASIC_WAVEFORM); // uncolored waveform
 }
 
 //
@@ -739,7 +748,7 @@ async function render(
         ],
         "color-dodge",
         1,
-        3,
+        10,
       ),
       (layerRingColorDarken = new Layer(RESOLUTION, drawSolidFill, "multiply")), // Ring Color Darken
       (layerRingCircle = new Layer(RESOLUTION, drawFillCircleAtCenter)), // Ring Base Circle
@@ -812,7 +821,12 @@ async function render(
       const next = () => {
         renderFrame(frameNumber + 1);
       };
-      if (isTest || frameNumber % PREVIEW_EVERY_N_FRAMES === 0) {
+      if (
+        isTest ||
+        frameNumber % PREVIEW_EVERY_N_FRAMES === 0 ||
+        frameNumber === nFrames - 1
+      ) {
+        // refresh UI
         viewerCanvas.ctx.drawImage(rootLayer.canvas, 0, 0);
         progressBarSetFunc((1 + frameNumber) / nFrames);
 

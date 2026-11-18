@@ -97,7 +97,7 @@ function saveBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function proceedToRender(renderArgs, mode) {
+async function proceedToRender(renderArgs, mode) {
   console.log(`Proceeding to render in ${mode} mode`);
 
   document.body.dataset.screen = "render"; // changes the active "screen"
@@ -107,60 +107,65 @@ function proceedToRender(renderArgs, mode) {
   prgrsBr.max = 1;
   prgrsBr.value = 0;
 
-  // video render target
-  const muxer = new Mp4Muxer.Muxer({
-    target: new Mp4Muxer.ArrayBufferTarget(),
-    video: {
-      codec: "avc", // H.264
-      width: RESOLUTION.x,
-      height: RESOLUTION.y,
-    },
-    fastStart: "in-memory",
+  // video render target (mediabunny)
+  const {
+    Output,
+    Mp4OutputFormat,
+    BufferTarget,
+    VideoSampleSource,
+    VideoSample,
+    Quality,
+    AudioBufferSource,
+  } = Mediabunny;
+
+  const target = new BufferTarget();
+  const output = new Output({
+    format: new Mp4OutputFormat({ fastStart: "in-memory" }),
+    target,
   });
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-    error: (e) => console.error("VideoEncoder error:", e),
+
+  const videoSource = new VideoSampleSource({
+    codec: "avc",
+    quality: new Quality({ bitrate: 5_000_000 }),
   });
-  encoder.configure({
-    codec: "avc1.420028",
-    width: RESOLUTION.x,
-    height: RESOLUTION.y,
-    bitrate: 8_000_000,
-    framerate: FPS,
+  output.addVideoTrack(videoSource, { frameRate: FPS });
+
+  // Add the AudioBufferSource configured for uncompressed Linear PCM
+  const audioSource = new AudioBufferSource({
+    codec: "pcm-s24",
+    // Note: `quality` is unused and can be omitted for PCM codecs
   });
+  output.addAudioTrack(audioSource);
+
+  await output.start();
+
+  await audioSource.add(renderArgs.audRecording);
+  audioSource.close(); // Recommended to free memory early
+  console.log("Uploaded audio attached to video output");
 
   render(
     renderArgs,
-    async (canvas, idxFrame) => {
-      // Wrap canvas in a VideoFrame (timestamp is in microseconds)
-      const frame = new VideoFrame(canvas, {
-        timestamp: (idxFrame * 1_000_000) / FPS,
-        duration: 1_000_000 / FPS,
-      });
+    (canvas, idxFrame) => {
+      // Capture current canvas state as a VideoSample (timestamps in seconds)
+      const timestamp = idxFrame / FPS;
+      const duration = 1 / FPS;
+      const sample = new VideoSample(canvas, { timestamp, duration });
 
-      // Encode frame (force a keyframe every 2 seconds)
-      encoder.encode(frame, { keyFrame: idxFrame % (FPS * 2) === 0 });
-      frame.close(); // Crucial to prevent memory leaks
-
-      // Optional: prevent backpressure buildup on heavy renders
-      if (encoder.encodeQueueSize > 5) {
-        await encoder.flush();
-      }
+      // Encode frame (force a keyframe every 2 seconds); close sample once encoded
+      const encodeOptions = { keyFrame: idxFrame % (FPS * 2) === 0 };
+      videoSource.add(sample, encodeOptions).then(() => sample.close());
     },
     (progressProportion) => {
       prgrsBr.value = progressProportion;
     },
     mode === "test",
   ).then(async () => {
-    // render complete
-
-    // 5. Finalize encoding and muxing
-    await encoder.flush();
-    muxer.finalize();
+    // render complete — finalize encoding and muxing
+    videoSource.close();
+    await output.finalize();
     if (mode === "real") {
-      // 6. Create Blob and prompt user to save
-      const { buffer } = muxer.target;
-      const blob = new Blob([buffer], { type: "video/mp4" });
+      // Create Blob and prompt user to save
+      const blob = new Blob([target.buffer], { type: "video/mp4" });
       saveBlob(blob, "wavevis.mp4");
     }
   });

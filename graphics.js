@@ -10,8 +10,8 @@ const N_FRAMES_OF_AUDIO_ON_SCREEN = 9; // must be an odd number that divides RES
 const FILLS_DUR_RMS_WIN_S = 1 / 60;
 const ORB_DUR_RMS_WIN_S = 1 / 3;
 const FILLS_PRECISION_RES_PX = 3;
-const BLOOM_MAX_RADIUS = 0.125;
-const BLOOM_INTENSITY = 0;
+const BLOOM_MAX_RADIUS = 1 / 5;
+const BLOOM_INTENSITY = 1 / 3;
 
 const PFP_RADIUS = 0.15;
 const PFP_RING_GAP = 0.015;
@@ -29,7 +29,7 @@ const COLOR_BASIC_WAVEFORM = "#606162";
 const COLOR_BG = "#060708";
 const COLOR_PFP_BG = "black";
 const COLOR_RING_COLOR_DARKEN_MULTIPLIER = "#a0a0a0";
-const COLOR_ORB = "#202122";
+const COLOR_ORB = "#202122"; // ADDS onto background color
 const NON_VIGNETTED_PROPORTION = 9 / 10;
 const COLOR_VIGNETTE = "#b0b0b0";
 const COLOR_OUTSIDE_OF_ORB_GLOW_MULTIPLIER = "#808080";
@@ -178,12 +178,14 @@ class Layer {
     drawFunc,
     blendMode = "source-over",
     alpha = 1.0,
+    nRepeatPaints = 0,
   ) {
     this.canvas = new OffscreenCanvas(width, height);
     this.canvas.ctx = this.canvas.getContext("2d");
     this.drawFunc = drawFunc;
     this.blendMode = blendMode;
     this.alpha = alpha;
+    this.nRepeatPaints = nRepeatPaints;
   }
   draw(...args) {
     this.canvas.ctx.save();
@@ -243,7 +245,7 @@ class LayerGroup {
         "color",
         "luminosity",
       ].includes(child.blendMode);
-      for (let nPaint = 0; nPaint < 1 + this.nRepeatPaints; nPaint++) {
+      for (let nPaint = 0; nPaint < 1 + child.nRepeatPaints; nPaint++) {
         this.canvas.ctx.globalAlpha = child.alpha;
         this.canvas.ctx.globalCompositeOperation = child.blendMode;
         if (isColorBasedBlendMode) {
@@ -262,7 +264,7 @@ class LayerGroup {
         }
       }
       */
-      for (let nPaint = 0; nPaint < 1 + this.nRepeatPaints; nPaint++) {
+      for (let nPaint = 0; nPaint < 1 + child.nRepeatPaints; nPaint++) {
         if (child.blendMode in this.webglBlender.modes) {
           const result = this.webglBlender.blend(
             this.canvas,
@@ -754,45 +756,53 @@ async function render(
     layerOrbGlow,
     layerRingFill,
     layerWaveFade,
-    layerRingColorDarken;
+    layerRingColorDarken,
+    layerRingLayerBg,
+    layerRingCircleBackdrop;
   const webglBlender = new WebGLBlendCompositor(RESOLUTION.x, RESOLUTION.y);
+  const filterPreBloom = "brightness(0.75) contrast(2)";
   const rootLayer = new LayerGroup(RESOLUTION, webglBlender, [
     (layerPfp = new Layer(RESOLUTION, drawLayerPfp)), // Profile Picture
-    new MixFiltersOverlay( // Bloom
+    new LayerGroup(
       RESOLUTION,
+      webglBlender,
       [
-        `blur(${res_min * BLOOM_MAX_RADIUS}px)`,
-        `blur(${(res_min * BLOOM_MAX_RADIUS) / 3}px)`,
-        `blur(${(res_min * BLOOM_MAX_RADIUS) / 3 ** 2}px)`,
+        new MixFiltersOverlay( // Bloom
+          RESOLUTION,
+          [
+            `${filterPreBloom} blur(${res_min * BLOOM_MAX_RADIUS}px)`,
+            `${filterPreBloom} blur(${(res_min * BLOOM_MAX_RADIUS) / 3}px)`,
+            `${filterPreBloom} blur(${(res_min * BLOOM_MAX_RADIUS) / 3 ** 2}px)`,
+          ],
+          "screen",
+          BLOOM_INTENSITY,
+        ),
+        new LayerGroup(
+          RESOLUTION,
+          webglBlender,
+          [
+            (layerRingFillMultiplyColor = new Layer(
+              RESOLUTION,
+              drawSolidFill,
+              "multiply",
+            )), // Ring Fill Dodge Intensity Control
+            (layerRingFill = new Layer(RESOLUTION, drawLayerRingFill)), // Ring Fill
+          ],
+          "color-dodge",
+          1,
+          1,
+        ),
+        (layerRingColorDarken = new Layer(
+          RESOLUTION,
+          drawSolidFill,
+          "multiply",
+        )), // Ring Color Darken
+        (layerRingCircle = new Layer(RESOLUTION, drawFillCircleAtCenter)), // Ring Base Circle
+        (layerRingLayerBg = new Layer(RESOLUTION, drawSolidFill)), // Ring Layer BG (compositing utility)
       ],
       "screen",
-      BLOOM_INTENSITY,
     ),
-    new LayerGroup(RESOLUTION, webglBlender, [
-      new LayerGroup(
-        RESOLUTION,
-        webglBlender,
-        [
-          (layerRingFillMultiplyColor = new Layer(
-            RESOLUTION,
-            drawSolidFill,
-            "multiply",
-          )), // Ring Fill Dodge Intensity Control
-          (layerRingFill = new Layer(RESOLUTION, drawLayerRingFill)), // Ring Fill
-        ],
-        "color-dodge",
-        1,
-        10,
-      ),
-      (layerRingColorDarken = new Layer(RESOLUTION, drawSolidFill, "multiply")), // Ring Color Darken
-      (layerRingCircle = new Layer(RESOLUTION, drawFillCircleAtCenter)), // Ring Base Circle
-    ]),
-    new MixFiltersOverlay( // Micro-Bloom
-      RESOLUTION,
-      [`blur(${2}px)`],
-      "screen",
-      BLOOM_INTENSITY,
-    ),
+    (layerRingCircleBackdrop = new Layer(RESOLUTION, drawFillCircleAtCenter)), // Ring Circle Backdrop (compositing utility)
     new LayerGroup(RESOLUTION, webglBlender, [
       (layerWaveFade = new Layer(RESOLUTION, drawLayerWaveFade, "source-atop")), // Waveform Fade into Ring
       (layerOrbGlow = new Layer(RESOLUTION, drawLayerOrbGlow, "multiply")), // Orb Glow
@@ -830,9 +840,11 @@ async function render(
   layerRingCircle.draw(ring_outer_radius, hexRingColor);
   layerRingColorDarken.draw(COLOR_RING_COLOR_DARKEN_MULTIPLIER);
   layerWaveFade.draw(IMAGES["center-wave-fade"].image);
-  layerRingFillMultiplyColor.draw("#fefefe");
+  layerRingFillMultiplyColor.draw("#7f7f7f");
   layerWaveformVignette.draw();
   layerOrbMultiplyColor.draw(COLOR_ORB);
+  layerRingCircleBackdrop.draw(ring_outer_radius, "black");
+  layerRingLayerBg.draw("black");
   layerWaveformColor.draw(); // TODO : make dynamic
 
   return await new Promise((resolve, reject) => {
